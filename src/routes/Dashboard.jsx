@@ -37,30 +37,6 @@ const accidentData = [
     longitude: 123.3198,
     status: "Emergency Response",
   },
-  {
-    id: "ACC-2026-0809",
-    severity: "Moderate",
-    type: "Sudden Deceleration",
-    location: "San Miguel, Zamboanga del Sur",
-    time: "34 mins ago",
-    speed: 41,
-    impact: 4.2,
-    latitude: 7.6564,
-    longitude: 123.2682,
-    status: "Resolved",
-  },
-  {
-    id: "ACC-2026-0808",
-    severity: "Low",
-    type: "Fall Detection",
-    location: "Guipos Highway",
-    time: "1 hr ago",
-    speed: 12,
-    impact: 2.1,
-    latitude: 7.7169,
-    longitude: 123.3171,
-    status: "Resolved",
-  },
 ];
 
 function SeverityBadge({ severity }) {
@@ -252,12 +228,11 @@ function Dashboard() {
                       {selectedAccident.type}
                     </h4>
 
-                    <p className="mt-1 text-xs text-slate-500">
+                    <p className="mt-1 mb-3 text-xs text-slate-500 break-words">
                       {selectedAccident.location}
                     </p>
+                    <SeverityBadge severity={selectedAccident.severity} />
                   </div>
-
-                  <SeverityBadge severity={selectedAccident.severity} />
                 </div>
               </div>
 
@@ -292,9 +267,6 @@ function Dashboard() {
             <div className="flex items-center justify-between border-b border-slate-100 p-5">
               <div>
                 <h3 className="font-bold">Live Sensor Data</h3>
-                <p className="mt-1 text-xs text-slate-500">
-                  Helmet Sensor #001
-                </p>
               </div>
 
               <div className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-600">
