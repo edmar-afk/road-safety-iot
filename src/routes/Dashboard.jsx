@@ -219,7 +219,7 @@ function Dashboard() {
               {/* selected marker info */}
               <div className="absolute bottom-5 left-5 max-w-[300px] rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
                 <div className="flex items-start justify-between gap-4">
-                  <div>
+                  <div className="w-[150px]">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-red-500">
                       Selected Incident
                     </p>
