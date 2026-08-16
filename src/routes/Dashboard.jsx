@@ -29,7 +29,7 @@ const accidentData = [
     id: "ACC-2026-0810",
     severity: "Critical",
     type: "High Impact Collision",
-    location: "Poblacion, Guipos, Zamboanga del Sur",
+    location: "Lakewood, Zamboanga del Sur",
     time: "2 mins ago",
     speed: 72,
     impact: 8.7,
@@ -148,7 +148,7 @@ function Dashboard() {
                 <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-500">
                   <span className="flex items-center gap-1.5">
                     <MapPin size={14} />
-                    Around Lakewood
+                    Lakewood
                   </span>
 
                   <span className="flex items-center gap-1.5">
