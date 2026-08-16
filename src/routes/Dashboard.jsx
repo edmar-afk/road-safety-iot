@@ -148,7 +148,7 @@ function Dashboard() {
                 <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-500">
                   <span className="flex items-center gap-1.5">
                     <MapPin size={14} />
-                    Poblacion, Guipos
+                    Around Lakewood
                   </span>
 
                   <span className="flex items-center gap-1.5">
