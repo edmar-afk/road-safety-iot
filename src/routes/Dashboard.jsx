@@ -1,12 +1,11 @@
 /* eslint-disable no-unused-vars */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
   AlertTriangle,
   BatteryCharging,
-  ChevronRight,
   Clock3,
   Gauge,
   MapPin,
@@ -22,7 +21,6 @@ function getImpactLevel(gForce) {
   if (gForce < 2) {
     return {
       label: "Small Impact",
-      color: "emerald",
       bg: "bg-emerald-50",
       text: "text-emerald-700",
       border: "border-emerald-200",
@@ -35,7 +33,6 @@ function getImpactLevel(gForce) {
   if (gForce < 3) {
     return {
       label: "Moderate Impact",
-      color: "yellow",
       bg: "bg-yellow-50",
       text: "text-yellow-700",
       border: "border-yellow-200",
@@ -48,7 +45,6 @@ function getImpactLevel(gForce) {
   if (gForce < 8) {
     return {
       label: "Significant Impact",
-      color: "orange",
       bg: "bg-orange-50",
       text: "text-orange-700",
       border: "border-orange-200",
@@ -60,7 +56,6 @@ function getImpactLevel(gForce) {
 
   return {
     label: "Critical Impact",
-    color: "red",
     bg: "bg-red-50",
     text: "text-red-700",
     border: "border-red-200",
@@ -92,7 +87,6 @@ function SeverityBadge({ severity }) {
       }`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${dots[severity]}`} />
-
       {severity}
     </span>
   );
@@ -102,51 +96,65 @@ function Dashboard() {
   const [impact, setImpact] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
+  const [apiError, setApiError] = useState("");
 
   // ---------------------------------------------
-  // Fetch latest impact
-  // ---------------------------------------------
-
-  const fetchImpact = async () => {
-    try {
-      const response = await fetch(IMPACT_API);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      setImpact(data);
-      setConnected(true);
-    } catch (error) {
-      console.error("Failed to fetch impact:", error);
-
-      setConnected(false);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ---------------------------------------------
-  // Poll Django every 2 seconds
+  // Fetch latest impact from Django
   // ---------------------------------------------
 
   useEffect(() => {
+    let active = true;
+
+    const fetchImpact = async () => {
+      try {
+        const response = await fetch(IMPACT_API);
+
+        if (!response.ok) {
+          const errorBody = await response.text();
+
+          throw new Error(
+            `HTTP ${response.status}: ${errorBody.slice(0, 200)}`,
+          );
+        }
+
+        const data = await response.json();
+
+        if (!active) return;
+
+        setImpact(data);
+        setConnected(true);
+        setApiError("");
+      } catch (error) {
+        if (!active) return;
+
+        console.error("Failed to fetch impact:", error);
+        setConnected(false);
+        setApiError(error.message || "Unable to connect to the API.");
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    };
+
     fetchImpact();
 
-    const interval = setInterval(() => {
-      fetchImpact();
-    }, 2000);
+    const interval = setInterval(fetchImpact, 2000);
 
-    return () => clearInterval(interval);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, []);
 
   // ---------------------------------------------
-  // Calculate impact information
+  // Impact information
   // ---------------------------------------------
 
-  const gForce = impact?.g_force ? Number(impact.g_force) : 0;
+  const gForce =
+    impact?.g_force != null && Number.isFinite(Number(impact.g_force))
+      ? Number(impact.g_force)
+      : 0;
 
   const impactLevel = getImpactLevel(gForce);
 
@@ -159,11 +167,90 @@ function Dashboard() {
           ? "Moderate"
           : "Low";
 
-  const hasImpact = gForce >= 2;
+  const hasImpact = impact?.impact_detected === true || gForce >= 2;
 
   const impactTime = impact?.timestamp
     ? new Date(impact.timestamp).toLocaleString()
     : "No impact data yet";
+
+  const formatImpactTimestamp = (timestamp) => {
+    if (!timestamp) return "No impact recorded";
+
+    const date = new Date(timestamp);
+
+    if (Number.isNaN(date.getTime())) return "Invalid timestamp";
+
+    const month = date.toLocaleString("en-US", {
+      month: "short",
+    });
+
+    const day = date.getDate();
+    const year = date.getFullYear();
+
+    const time = date
+      .toLocaleString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      })
+      .toLowerCase()
+      .replace(/\s/g, "");
+
+    return `${month}. ${day}, ${year} - ${time}`;
+  };
+
+  // ---------------------------------------------
+  // GPS information
+  // ---------------------------------------------
+
+  const gpsFixValid = impact?.gps_fix_valid === true;
+
+  const satellites = impact?.satellites ?? 0;
+
+  const latitude = impact?.latitude ?? null;
+  const longitude = impact?.longitude ?? null;
+  const altitude = impact?.altitude_m ?? null;
+  const speed = impact?.speed_kmph ?? null;
+
+  const gpsDate = impact?.gps_date ?? "—";
+  const gpsTime = impact?.gps_time_utc ?? "—";
+
+  const gpsCharsProcessed = impact?.gps_chars_processed ?? 0;
+
+  // Check whether GPS coordinates are valid
+  const hasCoordinates =
+    gpsFixValid &&
+    latitude !== null &&
+    longitude !== null &&
+    String(latitude).trim() !== "" &&
+    String(longitude).trim() !== "" &&
+    Number.isFinite(Number(latitude)) &&
+    Number.isFinite(Number(longitude)) &&
+    Number(latitude) >= -90 &&
+    Number(latitude) <= 90 &&
+    Number(longitude) >= -180 &&
+    Number(longitude) <= 180;
+
+  // Use real GPS coordinates when valid; otherwise use defaults
+  const mapLatitude = hasCoordinates ? Number(latitude) : 7.855729;
+
+  const mapLongitude = hasCoordinates ? Number(longitude) : 123.160166;
+
+  // Google Maps satellite URL
+  const googleMapsUrl = `https://www.google.com/maps?q=${mapLatitude},${mapLongitude}&t=k`;
+
+  const formatNumber = (value, decimals = 2) => {
+    if (
+      value === null ||
+      value === undefined ||
+      value === "" ||
+      !Number.isFinite(Number(value))
+    ) {
+      return "—";
+    }
+
+    return Number(value).toFixed(decimals);
+  };
 
   return (
     <div className="min-h-screen bg-[#f6f8fb] text-slate-900">
@@ -215,23 +302,33 @@ function Dashboard() {
             <span className="text-slate-400">•</span>
 
             <span className={connected ? "text-emerald-600" : "text-red-500"}>
-              {connected ? "Connected" : "Disconnected"}
+              {loading
+                ? "Connecting..."
+                : connected
+                  ? "Connected"
+                  : "Disconnected"}
             </span>
           </div>
         </section>
+
+        {/* ================= API ERROR ================= */}
+
+        {apiError && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <p className="font-semibold">Unable to retrieve sensor data</p>
+            <p className="mt-1 break-words">{apiError}</p>
+            <p className="mt-2 text-xs">
+              Check the Django endpoint and the PythonAnywhere error log.
+            </p>
+          </div>
+        )}
 
         {/* ================= IMPACT ALERT ================= */}
 
         {hasImpact && (
           <motion.section
-            initial={{
-              opacity: 0,
-              y: -10,
-            }}
-            animate={{
-              opacity: 1,
-              y: 0,
-            }}
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
             className={`relative overflow-hidden rounded-2xl border ${impactLevel.border} ${impactLevel.bg} p-5 shadow-sm`}
           >
             <div
@@ -293,54 +390,45 @@ function Dashboard() {
                 <h3 className="font-bold text-slate-900">Accident Location</h3>
 
                 <p className="mt-1 text-xs text-slate-500">
-                  GPS will be added later
+                  {hasCoordinates
+                    ? "Showing the latest valid GPS coordinates"
+                    : "Showing default location until GPS fix is available"}
                 </p>
               </div>
+
+              <a
+                href={`https://www.google.com/maps?q=${
+                  hasCoordinates ? latitude : 7.855729
+                },${hasCoordinates ? longitude : 123.160166}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+              >
+                <MapPin size={14} />
+                Open Maps
+              </a>
             </div>
 
-            {/* Fake map for now */}
-
+            {/* Embedded Google Map */}
             <div className="relative h-[400px] overflow-hidden bg-[#e9eef0]">
-              <div
-                className="absolute inset-0 opacity-50"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(#cbd5d8 1px, transparent 1px), linear-gradient(90deg, #cbd5d8 1px, transparent 1px)",
-                  backgroundSize: "50px 50px",
-                }}
+              <iframe
+                title="Accident Location Satellite Map"
+                className="absolute inset-0 h-full w-full border-0"
+                src={`https://maps.google.com/maps?q=${
+                  hasCoordinates ? latitude : 7.855729
+                },${hasCoordinates ? longitude : 123.160166}&t=k&z=19&output=embed`}
+                loading="lazy"
+                allowFullScreen
+                referrerPolicy="no-referrer-when-downgrade"
               />
 
-              <div className="absolute left-[15%] top-[-20%] h-[150%] w-12 rotate-[25deg] bg-white shadow-sm" />
-
-              <div className="absolute left-[-10%] top-[55%] h-10 w-[130%] rotate-[-8deg] bg-white shadow-sm" />
-
-              <div className="absolute left-[55%] top-[-10%] h-[130%] w-8 rotate-[62deg] bg-white shadow-sm" />
-
-              {hasImpact && (
-                <motion.button
-                  animate={{
-                    scale: [1, 1.12, 1],
-                  }}
-                  transition={{
-                    repeat: Infinity,
-                    duration: 1.8,
-                  }}
-                  className={`absolute left-[45%] top-[40%] flex h-12 w-12 items-center justify-center rounded-full ${impactLevel.darkBg}`}
-                >
-                  <span
-                    className={`flex h-8 w-8 items-center justify-center rounded-full ${impactLevel.dot} text-white shadow-lg`}
-                  >
-                    <Siren size={15} />
-                  </span>
-                </motion.button>
-              )}
-
-              <div className="absolute bottom-5 left-5 max-w-[300px] rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+              {/* Latest impact information */}
+              <div className="absolute bottom-5 left-5 z-10 max-w-[300px] rounded-xl border border-slate-200 bg-white/95 p-4 shadow-xl">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                   Latest Impact
                 </p>
 
-                <h4 className="mt-1 text-sm font-bold">
+                <h4 className="mt-1 text-sm font-bold text-slate-900">
                   {hasImpact ? impactLevel.label : "No Impact Detected"}
                 </h4>
 
@@ -355,14 +443,13 @@ function Dashboard() {
                 </div>
               </div>
 
-              {/* Legend */}
-
-              <div className="absolute bottom-5 right-5 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+              {/* Impact level legend */}
+              <div className="absolute bottom-5 right-5 z-10 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg">
                 <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                   Impact Level
                 </p>
 
-                <div className="space-y-1.5 text-xs">
+                <div className="space-y-1.5 text-xs text-slate-700">
                   <div className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
                     Small
@@ -385,6 +472,20 @@ function Dashboard() {
                 </div>
               </div>
             </div>
+
+            {/* Coordinates */}
+            <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+              <span className="font-semibold text-slate-700">Latitude:</span>{" "}
+              {hasCoordinates ? Number(latitude).toFixed(6) : "7.855729"}
+              <span className="mx-3">|</span>
+              <span className="font-semibold text-slate-700">
+                Longitude:
+              </span>{" "}
+              {hasCoordinates ? Number(longitude).toFixed(6) : "123.160166"}
+              {!hasCoordinates && (
+                <span className="ml-2 text-amber-600">(Default location)</span>
+              )}
+            </div>
           </div>
 
           {/* ================= LIVE SENSOR ================= */}
@@ -403,7 +504,6 @@ function Dashboard() {
                 }`}
               >
                 <Wifi size={13} />
-
                 {connected ? "Connected" : "Disconnected"}
               </div>
             </div>
@@ -438,24 +538,20 @@ function Dashboard() {
 
                 <div className="mt-6 grid grid-cols-2 gap-3">
                   {/* SPEED */}
-
                   <div className="rounded-xl bg-white/5 p-3">
                     <div className="flex items-center gap-2 text-slate-400">
                       <Gauge size={14} />
-
-                      <span className="text-xs">Speed</span>
+                      <span className="text-xs">GPS Speed</span>
                     </div>
 
                     <p className="mt-2 text-2xl font-bold">
-                      —
+                      {formatNumber(speed)}
                       <span className="ml-1 text-xs font-normal text-slate-400">
                         km/h
                       </span>
                     </p>
                   </div>
-
                   {/* IMPACT */}
-
                   <div
                     className={`rounded-xl p-3 ${
                       hasImpact ? impactLevel.darkBg : "bg-white/5"
@@ -467,7 +563,6 @@ function Dashboard() {
                       }`}
                     >
                       <Zap size={14} />
-
                       <span className="text-xs">Impact</span>
                     </div>
 
@@ -483,13 +578,10 @@ function Dashboard() {
                       </span>
                     </p>
                   </div>
-
                   {/* ACCELERATION */}
-
                   <div className="rounded-xl bg-white/5 p-3">
                     <div className="flex items-center gap-2 text-slate-400">
                       <Activity size={14} />
-
                       <span className="text-xs">Acceleration</span>
                     </div>
 
@@ -502,20 +594,15 @@ function Dashboard() {
                     </p>
                   </div>
 
-                  {/* BATTERY */}
-
+                  {/* WHEN IT HAPPENED */}
                   <div className="rounded-xl bg-white/5 p-3">
                     <div className="flex items-center gap-2 text-slate-400">
-                      <BatteryCharging size={14} />
-
-                      <span className="text-xs">Battery</span>
+                      <Clock3 size={14} />
+                      <span className="text-xs">When It Happened</span>
                     </div>
 
-                    <p className="mt-2 text-2xl font-bold">
-                      —
-                      <span className="ml-1 text-xs font-normal text-slate-400">
-                        %
-                      </span>
+                    <p className="mt-2 text-sm font-bold leading-relaxed text-white">
+                      {formatImpactTimestamp(impact?.timestamp)}
                     </p>
                   </div>
                 </div>
@@ -542,19 +629,23 @@ function Dashboard() {
                   </span>
                 </div>
 
-                {/* GPS */}
+                {/* GPS STATUS */}
 
                 <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3">
                   <div>
                     <p className="text-xs font-semibold">GPS</p>
 
                     <p className="text-[11px] text-slate-400">
-                      GPS not connected yet
+                      {satellites} satellite(s) reported
                     </p>
                   </div>
 
-                  <span className="text-xs font-bold text-slate-400">
-                    Pending
+                  <span
+                    className={`text-xs font-bold ${
+                      gpsFixValid ? "text-emerald-600" : "text-yellow-600"
+                    }`}
+                  >
+                    {gpsFixValid ? "Fix Acquired" : "No Fix"}
                   </span>
                 </div>
 
@@ -562,10 +653,10 @@ function Dashboard() {
 
                 <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3">
                   <div>
-                    <p className="text-xs font-semibold">GSM / WiFi</p>
+                    <p className="text-xs font-semibold">Wi-Fi</p>
 
                     <p className="text-[11px] text-slate-400">
-                      Data transmission
+                      API data transmission
                     </p>
                   </div>
 
@@ -579,6 +670,150 @@ function Dashboard() {
                 </div>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* ================= GPS DETAILS ================= */}
+
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                <MapPin size={22} />
+              </div>
+
+              <div>
+                <h3 className="font-bold text-slate-900">
+                  GPS Location Details
+                </h3>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Location information received from your ESP32
+                </p>
+              </div>
+            </div>
+
+            <span
+              className={`w-fit rounded-full px-3 py-1.5 text-xs font-semibold ${
+                gpsFixValid
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-yellow-50 text-yellow-700"
+              }`}
+            >
+              {gpsFixValid ? "GPS Ready" : "Looking for Satellite Signal...."}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Latitude */}
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-medium text-slate-500">Latitude</p>
+
+              <p className="mt-2 break-all text-lg font-bold">
+                {hasCoordinates ? formatNumber(latitude, 6) : "Unavailable"}
+              </p>
+            </div>
+
+            {/* Longitude */}
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-medium text-slate-500">Longitude</p>
+
+              <p className="mt-2 break-all text-lg font-bold">
+                {hasCoordinates ? formatNumber(longitude, 6) : "Unavailable"}
+              </p>
+            </div>
+
+            {/* Altitude */}
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-medium text-slate-500">Altitude</p>
+
+              <p className="mt-2 text-lg font-bold">
+                {formatNumber(altitude)}{" "}
+                <span className="text-xs font-normal text-slate-500">m</span>
+              </p>
+            </div>
+
+            {/* GPS Speed */}
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-medium text-slate-500">GPS Speed</p>
+
+              <p className="mt-2 text-lg font-bold">
+                {formatNumber(speed)}{" "}
+                <span className="text-xs font-normal text-slate-500">km/h</span>
+              </p>
+            </div>
+
+            {/* Satellites */}
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-medium text-slate-500">Satellites</p>
+
+              <p className="mt-2 text-lg font-bold">{satellites}</p>
+            </div>
+
+            {/* GPS characters */}
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-medium text-slate-500">
+                GPS Characters Processed
+              </p>
+
+              <p className="mt-2 text-lg font-bold">
+                {Number(gpsCharsProcessed).toLocaleString()}
+              </p>
+            </div>
+
+            {/* GPS Date */}
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-medium text-slate-500">GPS Date</p>
+
+              <p className="mt-2 text-lg font-bold">{gpsDate}</p>
+            </div>
+
+            {/* GPS UTC time */}
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-medium text-slate-500">
+                GPS Time (UTC)
+              </p>
+
+              <p className="mt-2 text-lg font-bold">{gpsTime}</p>
+            </div>
+
+            {/* Impact timestamp */}
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-medium text-slate-500">
+                Server Timestamp
+              </p>
+
+              <p className="mt-2 text-sm font-bold">{impactTime}</p>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 border-t border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-slate-500">
+              {hasCoordinates
+                ? "Valid coordinates are available for map navigation."
+                : "Coordinates will appear when the GPS receiver obtains a satellite signal to returns its location."}
+            </p>
+
+            {hasCoordinates && (
+              <a
+                href={googleMapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+              >
+                <MapPin size={17} />
+                View Accident Location
+              </a>
+            )}
           </div>
         </section>
       </main>
