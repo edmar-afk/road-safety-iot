@@ -438,9 +438,6 @@ function Dashboard() {
                     : "Waiting for sensor data"}
                 </p>
 
-                <div className="mt-3">
-                  <SeverityBadge severity={severity} />
-                </div>
               </div>
 
               {/* Impact level legend */}
