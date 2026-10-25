@@ -86,18 +86,28 @@ export default function Register() {
               ? value.join(" ")
               : String(value);
 
+            if (
+              field === "username" &&
+              /already exists|already taken|already registered|unique/i.test(
+                detail,
+              )
+            ) {
+              return "This mobile number is already registered. Please use another number.";
+            }
+
             const fieldNames = {
               username: "Mobile number",
               first_name: "Full name",
               password: "Password",
               password2: "Confirm password",
+              email: "Email",
             };
 
             return `${fieldNames[field] || field}: ${detail}`;
           })
           .join("\n");
 
-        throw new Error(messages || "Registration failed.");
+        throw new Error(messages || "Registration failed. Please try again.");
       }
 
       setSuccess("Your Road Safety account has been created!");
@@ -110,7 +120,7 @@ export default function Register() {
       });
 
       setTimeout(() => {
-        navigate("/login", { replace: true });
+        navigate("/", { replace: true });
       }, 1500);
     } catch (err) {
       setError(

@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 import {
   Activity,
   AlertTriangle,
-  BatteryCharging,
   Clock3,
   Gauge,
   MapPin,
@@ -15,7 +14,12 @@ import {
   Zap,
 } from "lucide-react";
 
+import UserLocationStatus from "../components/UserLocationStatus";
+
 const IMPACT_API = "https://roadsafety.pythonanywhere.com/api/log-impact/";
+
+const DEFAULT_LATITUDE = 7.855729;
+const DEFAULT_LONGITUDE = 123.160166;
 
 function getImpactLevel(gForce) {
   if (gForce < 2) {
@@ -65,38 +69,14 @@ function getImpactLevel(gForce) {
   };
 }
 
-function SeverityBadge({ severity }) {
-  const styles = {
-    Critical: "bg-red-50 text-red-700 border-red-200",
-    Significant: "bg-orange-50 text-orange-700 border-orange-200",
-    Moderate: "bg-yellow-50 text-yellow-700 border-yellow-200",
-    Low: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  };
-
-  const dots = {
-    Critical: "bg-red-500",
-    Significant: "bg-orange-500",
-    Moderate: "bg-yellow-500",
-    Low: "bg-emerald-500",
-  };
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${
-        styles[severity]
-      }`}
-    >
-      <span className={`h-1.5 w-1.5 rounded-full ${dots[severity]}`} />
-      {severity}
-    </span>
-  );
-}
-
 function Dashboard() {
   const [impact, setImpact] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
   const [apiError, setApiError] = useState("");
+
+  // The current location of the person viewing this website.
+  const [userLocation, setUserLocation] = useState(null);
 
   // ---------------------------------------------
   // Fetch latest impact from Django
@@ -200,7 +180,8 @@ function Dashboard() {
   };
 
   // ---------------------------------------------
-  // GPS information
+  // ESP32 GPS information
+  // This remains separate from the viewer's location.
   // ---------------------------------------------
 
   const gpsFixValid = impact?.gps_fix_valid === true;
@@ -217,7 +198,6 @@ function Dashboard() {
 
   const gpsCharsProcessed = impact?.gps_chars_processed ?? 0;
 
-  // Check whether GPS coordinates are valid
   const hasCoordinates =
     gpsFixValid &&
     latitude !== null &&
@@ -231,12 +211,51 @@ function Dashboard() {
     Number(longitude) >= -180 &&
     Number(longitude) <= 180;
 
-  // Use real GPS coordinates when valid; otherwise use defaults
-  const mapLatitude = hasCoordinates ? Number(latitude) : 7.855729;
+  // ---------------------------------------------
+  // Map location selection
+  //
+  // Below 4G:
+  //   Valid ESP32 GPS -> default location
+  //
+  // At or above 4G:
+  //   Viewer location -> default location
+  // ---------------------------------------------
 
-  const mapLongitude = hasCoordinates ? Number(longitude) : 123.160166;
+  const useViewerLocation = gForce >= 4;
 
-  // Google Maps satellite URL
+  const hasViewerCoordinates =
+    userLocation !== null &&
+    Number.isFinite(userLocation.latitude) &&
+    Number.isFinite(userLocation.longitude) &&
+    userLocation.latitude >= -90 &&
+    userLocation.latitude <= 90 &&
+    userLocation.longitude >= -180 &&
+    userLocation.longitude <= 180;
+
+  const mapLatitude = useViewerLocation
+    ? hasViewerCoordinates
+      ? userLocation.latitude
+      : DEFAULT_LATITUDE
+    : hasCoordinates
+      ? Number(latitude)
+      : DEFAULT_LATITUDE;
+
+  const mapLongitude = useViewerLocation
+    ? hasViewerCoordinates
+      ? userLocation.longitude
+      : DEFAULT_LONGITUDE
+    : hasCoordinates
+      ? Number(longitude)
+      : DEFAULT_LONGITUDE;
+
+  const mapLocationLabel = useViewerLocation
+    ? hasViewerCoordinates
+      ? "Showing the viewer's current location"
+      : "Default location — viewer location unavailable"
+    : hasCoordinates
+      ? "Showing the latest valid ESP32 GPS coordinates"
+      : "Showing the default location until GPS fix is available";
+
   const googleMapsUrl = `https://www.google.com/maps?q=${mapLatitude},${mapLongitude}&t=k`;
 
   const formatNumber = (value, decimals = 2) => {
@@ -276,7 +295,7 @@ function Dashboard() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1600px] space-y-6 p-6 lg:p-8">
+      <main className="mx-auto max-w-[1600px] space-y-6 p-4 sm:p-6 lg:p-8">
         {/* ================= PAGE INTRO ================= */}
 
         <section className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -316,7 +335,9 @@ function Dashboard() {
         {apiError && (
           <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             <p className="font-semibold">Unable to retrieve sensor data</p>
+
             <p className="mt-1 break-words">{apiError}</p>
+
             <p className="mt-2 text-xs">
               Check the Django endpoint and the PythonAnywhere error log.
             </p>
@@ -381,113 +402,130 @@ function Dashboard() {
 
         {/* ================= MAIN CONTENT ================= */}
 
-        <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.65fr_1fr]">
-          {/* ================= MAP ================= */}
+        <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[1.65fr_1fr]">
+          {/* ================= VIEWER LOCATION + MAP ================= */}
 
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-100 p-5">
-              <div>
-                <h3 className="font-bold text-slate-900">Accident Location</h3>
+          <div className="min-w-0 space-y-4">
+            <UserLocationStatus compact onLocationChange={setUserLocation} />
 
-                <p className="mt-1 text-xs text-slate-500">
-                  {hasCoordinates
-                    ? "Showing the latest valid GPS coordinates"
-                    : "Showing default location until GPS fix is available"}
-                </p>
+            {/* ================= MAP ================= */}
+
+            <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-col gap-3 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <h3 className="font-bold text-slate-900">
+                    Accident Location
+                  </h3>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    {mapLocationLabel}
+                  </p>
+
+                  {useViewerLocation && (
+                    <p className="mt-1 text-xs font-medium text-amber-700">
+                      {hasViewerCoordinates
+                        ? "Impact is at least 4G. The map is using the viewer's location."
+                        : "Impact is at least 4G, but viewer location is unavailable. Using the default location."}
+                    </p>
+                  )}
+                </div>
+
+                <a
+                  href={googleMapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 sm:self-auto"
+                >
+                  <MapPin size={14} />
+                  Open Maps
+                </a>
               </div>
 
-              <a
-                href={`https://www.google.com/maps?q=${
-                  hasCoordinates ? latitude : 7.855729
-                },${hasCoordinates ? longitude : 123.160166}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
-              >
-                <MapPin size={14} />
-                Open Maps
-              </a>
-            </div>
+              {/* Embedded Google Map */}
 
-            {/* Embedded Google Map */}
-            <div className="relative h-[400px] overflow-hidden bg-[#e9eef0]">
-              <iframe
-                title="Accident Location Satellite Map"
-                className="absolute inset-0 h-full w-full border-0"
-                src={`https://maps.google.com/maps?q=${
-                  hasCoordinates ? latitude : 7.855729
-                },${hasCoordinates ? longitude : 123.160166}&t=k&z=19&output=embed`}
-                loading="lazy"
-                allowFullScreen
-                referrerPolicy="no-referrer-when-downgrade"
-              />
+              <div className="relative h-[320px] overflow-hidden bg-[#e9eef0] sm:h-[400px]">
+                <iframe
+                  key={`${mapLatitude},${mapLongitude}`}
+                  title="Accident Location Satellite Map"
+                  className="absolute inset-0 h-full w-full border-0"
+                  src={`https://maps.google.com/maps?q=${mapLatitude},${mapLongitude}&t=k&z=19&output=embed`}
+                  loading="lazy"
+                  allowFullScreen
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
 
-              {/* Latest impact information */}
-              <div className="absolute bottom-5 left-5 z-10 max-w-[300px] rounded-xl border border-slate-200 bg-white/95 p-4 shadow-xl">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Latest Impact
-                </p>
+                {/* Latest impact information */}
 
-                <h4 className="mt-1 text-sm font-bold text-slate-900">
-                  {hasImpact ? impactLevel.label : "No Impact Detected"}
-                </h4>
+                <div className="absolute bottom-3 left-3 z-10 max-w-[220px] rounded-xl border border-slate-200 bg-white/95 p-3 shadow-xl sm:bottom-5 sm:left-5 sm:max-w-[300px] sm:p-4">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Latest Impact
+                  </p>
 
-                <p className="mt-1 text-xs text-slate-500">
-                  {hasImpact
-                    ? `${gForce.toFixed(2)} G detected`
-                    : "Waiting for sensor data"}
-                </p>
+                  <h4 className="mt-1 text-sm font-bold text-slate-900">
+                    {hasImpact ? impactLevel.label : "No Impact Detected"}
+                  </h4>
 
-              </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {hasImpact
+                      ? `${gForce.toFixed(2)} G detected`
+                      : "Waiting for sensor data"}
+                  </p>
+                </div>
 
-              {/* Impact level legend */}
-              <div className="absolute bottom-5 right-5 z-10 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg">
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Impact Level
-                </p>
+                {/* Impact level legend */}
 
-                <div className="space-y-1.5 text-xs text-slate-700">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                    Small
-                  </div>
+                <div className="absolute bottom-3 right-3 z-10 rounded-xl border border-slate-200 bg-white/95 p-2.5 shadow-lg sm:bottom-5 sm:right-5 sm:p-3">
+                  <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Impact Level
+                  </p>
 
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-yellow-500" />
-                    Moderate
-                  </div>
+                  <div className="space-y-1.5 text-xs text-slate-700">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                      Small
+                    </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-orange-500" />
-                    Significant
-                  </div>
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full bg-yellow-500" />
+                      Moderate
+                    </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
-                    Critical
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full bg-orange-500" />
+                      Significant
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
+                      Critical
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Coordinates */}
-            <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
-              <span className="font-semibold text-slate-700">Latitude:</span>{" "}
-              {hasCoordinates ? Number(latitude).toFixed(6) : "7.855729"}
-              <span className="mx-3">|</span>
-              <span className="font-semibold text-slate-700">
-                Longitude:
-              </span>{" "}
-              {hasCoordinates ? Number(longitude).toFixed(6) : "123.160166"}
-              {!hasCoordinates && (
-                <span className="ml-2 text-amber-600">(Default location)</span>
-              )}
+              {/* Selected map coordinates */}
+
+              <div className="break-words border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+                <div>
+                  <span className="font-semibold text-slate-700">
+                    Latitude:
+                  </span>{" "}
+                  {mapLatitude.toFixed(6)}
+                  <span className="mx-2 sm:mx-3">|</span>
+                  <span className="font-semibold text-slate-700">
+                    Longitude:
+                  </span>{" "}
+                  {mapLongitude.toFixed(6)}
+                </div>
+
+                <p className="mt-1 text-slate-500">{mapLocationLabel}</p>
+              </div>
             </div>
           </div>
 
           {/* ================= LIVE SENSOR ================= */}
 
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="min-w-0 rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 p-5">
               <div>
                 <h3 className="font-bold">Live Sensor Data</h3>
@@ -535,6 +573,7 @@ function Dashboard() {
 
                 <div className="mt-6 grid grid-cols-2 gap-3">
                   {/* SPEED */}
+
                   <div className="rounded-xl bg-white/5 p-3">
                     <div className="flex items-center gap-2 text-slate-400">
                       <Gauge size={14} />
@@ -548,7 +587,9 @@ function Dashboard() {
                       </span>
                     </p>
                   </div>
+
                   {/* IMPACT */}
+
                   <div
                     className={`rounded-xl p-3 ${
                       hasImpact ? impactLevel.darkBg : "bg-white/5"
@@ -575,7 +616,9 @@ function Dashboard() {
                       </span>
                     </p>
                   </div>
+
                   {/* ACCELERATION */}
+
                   <div className="rounded-xl bg-white/5 p-3">
                     <div className="flex items-center gap-2 text-slate-400">
                       <Activity size={14} />
@@ -592,6 +635,7 @@ function Dashboard() {
                   </div>
 
                   {/* WHEN IT HAPPENED */}
+
                   <div className="rounded-xl bg-white/5 p-3">
                     <div className="flex items-center gap-2 text-slate-400">
                       <Clock3 size={14} />
@@ -626,7 +670,7 @@ function Dashboard() {
                   </span>
                 </div>
 
-                {/* GPS STATUS */}
+                {/* ESP32 GPS STATUS */}
 
                 <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3">
                   <div>
@@ -670,7 +714,7 @@ function Dashboard() {
           </div>
         </section>
 
-        {/* ================= GPS DETAILS ================= */}
+        {/* ================= ESP32 GPS DETAILS ================= */}
 
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-col gap-3 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -697,7 +741,7 @@ function Dashboard() {
                   : "bg-yellow-50 text-yellow-700"
               }`}
             >
-              {gpsFixValid ? "GPS Ready" : "Looking for Satellite Signal...."}
+              {gpsFixValid ? "GPS Ready" : "Looking for Satellite Signal..."}
             </span>
           </div>
 
@@ -796,13 +840,13 @@ function Dashboard() {
           <div className="flex flex-col gap-3 border-t border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-slate-500">
               {hasCoordinates
-                ? "Valid coordinates are available for map navigation."
-                : "Coordinates will appear when the GPS receiver obtains a satellite signal to returns its location."}
+                ? "Valid ESP32 coordinates are available for accident-location navigation."
+                : "ESP32 coordinates will appear when the GPS receiver obtains a valid satellite fix."}
             </p>
 
             {hasCoordinates && (
               <a
-                href={googleMapsUrl}
+                href={`https://www.google.com/maps?q=${Number(latitude)},${Number(longitude)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
