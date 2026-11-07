@@ -1,7 +1,12 @@
+/* eslint-disable no-useless-escape */
 /* eslint-disable no-unused-vars */
 
+import { Link } from "react-router-dom";
+
 import React, { useEffect, useState } from "react";
+
 import { motion } from "framer-motion";
+
 import {
   Activity,
   AlertTriangle,
@@ -14,22 +19,30 @@ import {
   Zap,
 } from "lucide-react";
 
+import api from "../assets/api";
+
 import UserLocationStatus from "../components/UserLocationStatus";
 
-const IMPACT_API = "https://roadsafety.pythonanywhere.com/api/log-impact/";
-
 const DEFAULT_LATITUDE = 7.855729;
+
 const DEFAULT_LONGITUDE = 123.160166;
+const MAX_IMPACT_AGE_MS = 5 * 60 * 1000;
 
 function getImpactLevel(gForce) {
   if (gForce < 2) {
     return {
       label: "Small Impact",
+
       bg: "bg-emerald-50",
+
       text: "text-emerald-700",
+
       border: "border-emerald-200",
+
       dot: "bg-emerald-500",
+
       darkBg: "bg-emerald-500/20",
+
       darkText: "text-emerald-400",
     };
   }
@@ -37,11 +50,17 @@ function getImpactLevel(gForce) {
   if (gForce < 3) {
     return {
       label: "Moderate Impact",
+
       bg: "bg-yellow-50",
+
       text: "text-yellow-700",
+
       border: "border-yellow-200",
+
       dot: "bg-yellow-500",
+
       darkBg: "bg-yellow-500/20",
+
       darkText: "text-yellow-400",
     };
   }
@@ -49,37 +68,55 @@ function getImpactLevel(gForce) {
   if (gForce < 8) {
     return {
       label: "Significant Impact",
+
       bg: "bg-orange-50",
+
       text: "text-orange-700",
+
       border: "border-orange-200",
+
       dot: "bg-orange-500",
+
       darkBg: "bg-orange-500/20",
+
       darkText: "text-orange-400",
     };
   }
 
   return {
     label: "Critical Impact",
+
     bg: "bg-red-50",
+
     text: "text-red-700",
+
     border: "border-red-200",
+
     dot: "bg-red-500",
+
     darkBg: "bg-red-500/20",
+
     darkText: "text-red-400",
   };
 }
 
 function Dashboard() {
   const [impact, setImpact] = useState(null);
+
   const [loading, setLoading] = useState(true);
+
   const [connected, setConnected] = useState(false);
+
   const [apiError, setApiError] = useState("");
 
-  // The current location of the person viewing this website.
+  // Current location of the person viewing this website.
+
   const [userLocation, setUserLocation] = useState(null);
 
   // ---------------------------------------------
+
   // Fetch latest impact from Django
+
   // ---------------------------------------------
 
   useEffect(() => {
@@ -87,48 +124,84 @@ function Dashboard() {
 
     const fetchImpact = async () => {
       try {
-        const response = await fetch(IMPACT_API);
-
-        if (!response.ok) {
-          const errorBody = await response.text();
-
-          throw new Error(
-            `HTTP ${response.status}: ${errorBody.slice(0, 200)}`,
-          );
-        }
-
-        const data = await response.json();
-
+        const response = await api.get("/api/impact-logs/");
         if (!active) return;
 
-        setImpact(data);
+        const logs = Array.isArray(response.data)
+          ? response.data
+          : Array.isArray(response.data?.results)
+            ? response.data.results
+            : [];
+
+        const sortedLogs = [...logs].sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+        );
+
+        const latestLog = sortedLogs[0] || null;
+
+        if (latestLog?.timestamp) {
+          const timestamp = new Date(latestLog.timestamp).getTime();
+          const age = Date.now() - timestamp;
+
+          if (
+            Number.isFinite(timestamp) &&
+            age >= 0 &&
+            age <= MAX_IMPACT_AGE_MS
+          ) {
+            setImpact(latestLog);
+          } else {
+            setImpact(null);
+          }
+        } else {
+          setImpact(null);
+        }
+
         setConnected(true);
         setApiError("");
       } catch (error) {
         if (!active) return;
-
-        console.error("Failed to fetch impact:", error);
+        console.error("Failed to fetch impact logs:", error);
         setConnected(false);
-        setApiError(error.message || "Unable to connect to the API.");
+        setApiError(
+          error.response?.data?.detail ||
+            error.response?.data?.error ||
+            error.message ||
+            "Unable to retrieve impact logs.",
+        );
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     };
 
     fetchImpact();
+    const fetchInterval = setInterval(fetchImpact, 2000);
 
-    const interval = setInterval(fetchImpact, 2000);
+    const expirationInterval = setInterval(() => {
+      setImpact((currentImpact) => {
+        if (!currentImpact?.timestamp) return null;
+        const timestamp = new Date(currentImpact.timestamp).getTime();
+        const age = Date.now() - timestamp;
+
+        if (!Number.isFinite(timestamp) || age < 0 || age > MAX_IMPACT_AGE_MS) {
+          return null;
+        }
+
+        return currentImpact;
+      });
+    }, 1000);
 
     return () => {
       active = false;
-      clearInterval(interval);
+      clearInterval(fetchInterval);
+      clearInterval(expirationInterval);
     };
   }, []);
 
   // ---------------------------------------------
   // Impact information
+  // ---------------------------------------------
+
   // ---------------------------------------------
 
   const gForce =
@@ -165,23 +238,32 @@ function Dashboard() {
     });
 
     const day = date.getDate();
+
     const year = date.getFullYear();
 
     const time = date
+
       .toLocaleString("en-US", {
         hour: "numeric",
+
         minute: "2-digit",
+
         hour12: true,
       })
+
       .toLowerCase()
+
       .replace(/\s/g, "");
 
     return `${month}. ${day}, ${year} - ${time}`;
   };
 
   // ---------------------------------------------
+
   // ESP32 GPS information
+
   // This remains separate from the viewer's location.
+
   // ---------------------------------------------
 
   const gpsFixValid = impact?.gps_fix_valid === true;
@@ -189,11 +271,15 @@ function Dashboard() {
   const satellites = impact?.satellites ?? 0;
 
   const latitude = impact?.latitude ?? null;
+
   const longitude = impact?.longitude ?? null;
+
   const altitude = impact?.altitude_m ?? null;
+
   const speed = impact?.speed_kmph ?? null;
 
   const gpsDate = impact?.gps_date ?? "—";
+
   const gpsTime = impact?.gps_time_utc ?? "—";
 
   const gpsCharsProcessed = impact?.gps_chars_processed ?? 0;
@@ -212,29 +298,37 @@ function Dashboard() {
     Number(longitude) <= 180;
 
   // ---------------------------------------------
+
   // Map location selection
+
   //
+
   // Below 4G:
-  //   Valid ESP32 GPS -> default location
+
+  // Valid ESP32 GPS -> default location
+
   //
+
   // At or above 4G:
-  //   Viewer location -> default location
+
+  // Viewer location -> default location
+
   // ---------------------------------------------
 
   const useViewerLocation = gForce >= 4;
 
   const hasViewerCoordinates =
     userLocation !== null &&
-    Number.isFinite(userLocation.latitude) &&
-    Number.isFinite(userLocation.longitude) &&
-    userLocation.latitude >= -90 &&
-    userLocation.latitude <= 90 &&
-    userLocation.longitude >= -180 &&
-    userLocation.longitude <= 180;
+    Number.isFinite(Number(userLocation.latitude)) &&
+    Number.isFinite(Number(userLocation.longitude)) &&
+    Number(userLocation.latitude) >= -90 &&
+    Number(userLocation.latitude) <= 90 &&
+    Number(userLocation.longitude) >= -180 &&
+    Number(userLocation.longitude) <= 180;
 
   const mapLatitude = useViewerLocation
     ? hasViewerCoordinates
-      ? userLocation.latitude
+      ? Number(userLocation.latitude)
       : DEFAULT_LATITUDE
     : hasCoordinates
       ? Number(latitude)
@@ -242,7 +336,7 @@ function Dashboard() {
 
   const mapLongitude = useViewerLocation
     ? hasViewerCoordinates
-      ? userLocation.longitude
+      ? Number(userLocation.longitude)
       : DEFAULT_LONGITUDE
     : hasCoordinates
       ? Number(longitude)
@@ -256,7 +350,7 @@ function Dashboard() {
       ? "Showing the latest valid ESP32 GPS coordinates"
       : "Showing the default location until GPS fix is available";
 
-  const googleMapsUrl = `https://www.google.com/maps?q=${mapLatitude},${mapLongitude}&t=k`;
+  const googleMapsUrl = `https://www\.google.com/maps?q=${mapLatitude},${mapLongitude}&t=k`;
 
   const formatNumber = (value, decimals = 2) => {
     if (
@@ -292,6 +386,13 @@ function Dashboard() {
               </p>
             </div>
           </div>
+
+          <Link
+            to="/logout"
+            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
+          >
+            Logout
+          </Link>
         </div>
       </header>
 
@@ -386,6 +487,7 @@ function Dashboard() {
                   <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-500">
                     <span className="flex items-center gap-1.5">
                       <Clock3 size={14} />
+
                       {impactTime}
                     </span>
 
@@ -539,6 +641,7 @@ function Dashboard() {
                 }`}
               >
                 <Wifi size={13} />
+
                 {connected ? "Connected" : "Disconnected"}
               </div>
             </div>
@@ -572,22 +675,6 @@ function Dashboard() {
                 {/* SENSOR CARDS */}
 
                 <div className="mt-6 grid grid-cols-2 gap-3">
-                  {/* SPEED */}
-
-                  <div className="rounded-xl bg-white/5 p-3">
-                    <div className="flex items-center gap-2 text-slate-400">
-                      <Gauge size={14} />
-                      <span className="text-xs">GPS Speed</span>
-                    </div>
-
-                    <p className="mt-2 text-2xl font-bold">
-                      {formatNumber(speed)}
-                      <span className="ml-1 text-xs font-normal text-slate-400">
-                        km/h
-                      </span>
-                    </p>
-                  </div>
-
                   {/* IMPACT */}
 
                   <div
@@ -601,6 +688,7 @@ function Dashboard() {
                       }`}
                     >
                       <Zap size={14} />
+
                       <span className="text-xs">Impact</span>
                     </div>
 
@@ -622,6 +710,7 @@ function Dashboard() {
                   <div className="rounded-xl bg-white/5 p-3">
                     <div className="flex items-center gap-2 text-slate-400">
                       <Activity size={14} />
+
                       <span className="text-xs">Acceleration</span>
                     </div>
 
@@ -639,6 +728,7 @@ function Dashboard() {
                   <div className="rounded-xl bg-white/5 p-3">
                     <div className="flex items-center gap-2 text-slate-400">
                       <Clock3 size={14} />
+
                       <span className="text-xs">When It Happened</span>
                     </div>
 
@@ -670,26 +760,6 @@ function Dashboard() {
                   </span>
                 </div>
 
-                {/* ESP32 GPS STATUS */}
-
-                <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3">
-                  <div>
-                    <p className="text-xs font-semibold">GPS</p>
-
-                    <p className="text-[11px] text-slate-400">
-                      {satellites} satellite(s) reported
-                    </p>
-                  </div>
-
-                  <span
-                    className={`text-xs font-bold ${
-                      gpsFixValid ? "text-emerald-600" : "text-yellow-600"
-                    }`}
-                  >
-                    {gpsFixValid ? "Fix Acquired" : "No Fix"}
-                  </span>
-                </div>
-
                 {/* WIFI */}
 
                 <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3">
@@ -715,148 +785,6 @@ function Dashboard() {
         </section>
 
         {/* ================= ESP32 GPS DETAILS ================= */}
-
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-3 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                <MapPin size={22} />
-              </div>
-
-              <div>
-                <h3 className="font-bold text-slate-900">
-                  GPS Location Details
-                </h3>
-
-                <p className="mt-1 text-xs text-slate-500">
-                  Location information received from your ESP32
-                </p>
-              </div>
-            </div>
-
-            <span
-              className={`w-fit rounded-full px-3 py-1.5 text-xs font-semibold ${
-                gpsFixValid
-                  ? "bg-emerald-50 text-emerald-700"
-                  : "bg-yellow-50 text-yellow-700"
-              }`}
-            >
-              {gpsFixValid ? "GPS Ready" : "Looking for Satellite Signal..."}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
-            {/* Latitude */}
-
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-500">Latitude</p>
-
-              <p className="mt-2 break-all text-lg font-bold">
-                {hasCoordinates ? formatNumber(latitude, 6) : "Unavailable"}
-              </p>
-            </div>
-
-            {/* Longitude */}
-
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-500">Longitude</p>
-
-              <p className="mt-2 break-all text-lg font-bold">
-                {hasCoordinates ? formatNumber(longitude, 6) : "Unavailable"}
-              </p>
-            </div>
-
-            {/* Altitude */}
-
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-500">Altitude</p>
-
-              <p className="mt-2 text-lg font-bold">
-                {formatNumber(altitude)}{" "}
-                <span className="text-xs font-normal text-slate-500">m</span>
-              </p>
-            </div>
-
-            {/* GPS Speed */}
-
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-500">GPS Speed</p>
-
-              <p className="mt-2 text-lg font-bold">
-                {formatNumber(speed)}{" "}
-                <span className="text-xs font-normal text-slate-500">km/h</span>
-              </p>
-            </div>
-
-            {/* Satellites */}
-
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-500">Satellites</p>
-
-              <p className="mt-2 text-lg font-bold">{satellites}</p>
-            </div>
-
-            {/* GPS characters */}
-
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-500">
-                GPS Characters Processed
-              </p>
-
-              <p className="mt-2 text-lg font-bold">
-                {Number(gpsCharsProcessed).toLocaleString()}
-              </p>
-            </div>
-
-            {/* GPS Date */}
-
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-500">GPS Date</p>
-
-              <p className="mt-2 text-lg font-bold">{gpsDate}</p>
-            </div>
-
-            {/* GPS UTC time */}
-
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-500">
-                GPS Time (UTC)
-              </p>
-
-              <p className="mt-2 text-lg font-bold">{gpsTime}</p>
-            </div>
-
-            {/* Impact timestamp */}
-
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-500">
-                Server Timestamp
-              </p>
-
-              <p className="mt-2 text-sm font-bold">{impactTime}</p>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3 border-t border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-slate-500">
-              {hasCoordinates
-                ? "Valid ESP32 coordinates are available for accident-location navigation."
-                : "ESP32 coordinates will appear when the GPS receiver obtains a valid satellite fix."}
-            </p>
-
-            {hasCoordinates && (
-              <a
-                href={`https://www.google.com/maps?q=${Number(latitude)},${Number(longitude)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
-              >
-                <MapPin size={17} />
-                View Accident Location
-              </a>
-            )}
-          </div>
-        </section>
       </main>
     </div>
   );
